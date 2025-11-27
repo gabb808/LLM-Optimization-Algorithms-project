@@ -7,13 +7,13 @@ class GeneticAlgorithm:
 
         # on definie les valeurs que peuvent prendre les hyperparametres 
         self.bounds = {
-            'lr': (0.0001, 0.01),
-            'dropout': (0.0, 0.5)
+            'lr': (0.0001, 0.01), # learning rate aka la vitesse d'apprentissage
+            'dropout': (0.0, 0.5) # taux de dropout aka pour eviter au modèle de tricher en apprenant par cœur
         }
         self.choices = {
-            'batch_size': [16, 32, 64, 128],
-            'n_embd': [32, 64, 128], # taille du modele
-            'n_layer': [2, 4, 6],   # profondeur du modele
+            'batch_size': [16, 32, 64, 128], #taille des lots de données traités simultanément.
+            'n_embd': [32, 64, 128], # (Largeur) : La "capacité de mémorisation" du modèle.
+            'n_layer': [2, 4, 6],   # profondeur du modeleLa "capacité de raisonnement" (abstraction).
             }
 
     def init_population(self):
@@ -85,5 +85,6 @@ class GeneticAlgorithm:
             next_gen.append(child)
 
         return next_gen
+    
     
 
