@@ -1,16 +1,18 @@
-import random
 import numpy as np
+from src.trainer import evaluate_config
 
 class QLearningAgent:
-    def __init__(self, learning_rate=0.1, discount_factor=0.95, epsilon=1.0, epsilon_decay=0.99, min_epsilon=0.05):
-        self.lr = learning_rate
-        self.gamma = discount_factor
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.min_epsilon = min_epsilon
+    def __init__(self, alpha=0.1, gamma=0.9, epsilon=1.0, epsilon_decay=0.98, min_epsilon=0.1):
+        self.alpha = alpha        # Learning Rate: How fast I accept new information
+        self.gamma = gamma        # Discount Factor: How much I care about future rewards vs immediate ones
+        self.epsilon = epsilon    # Exploration Rate: Probability of trying something random
+        self.epsilon_decay = epsilon_decay # How fast I stop exploring and start exploiting
+        self.min_epsilon = min_epsilon     # I always want to keep a tiny bit of exploration
         
-        # Espace d'actions (Doit correspondre à ce que evaluate_config attend)
-        self.param_choices = [
+        # SEARCH SPACE
+        # I'm defining the hyperparameters and their possible values right here.
+        # The order matters because I treat this as a sequence (State 0 -> State 1 -> etc.)
+        self.param_specs = [
             ('lr', [0.0001, 0.0005, 0.001, 0.005, 0.01]),
             ('dropout', [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
             ('batch_size', [16, 32, 64, 128]),
@@ -18,50 +20,87 @@ class QLearningAgent:
             ('n_layer', [2, 4, 6])
         ]
         
-        # Q-Table : Dictionnaire {(state_index, action_index): value}
-        self.q_table = {}
-
-    def get_q(self, state_idx, action_idx):
-        return self.q_table.get((state_idx, action_idx), 0.0)
-
-    def choose_config(self):
-        """L'agent construit une config étape par étape"""
-        chosen_config = {}
-        chosen_indices = []
+        # Helper lists to access names and choices easily
+        self.param_names = [p[0] for p in self.param_specs]
+        self.param_choices = [p[1] for p in self.param_specs]
         
-        # Pour chaque paramètre (État 0, État 1, ...)
-        for state_idx, (param_name, options) in enumerate(self.param_choices):
-            
-            # Epsilon-Greedy
-            if random.random() < self.epsilon:
-                action_idx = random.randint(0, len(options) - 1) # Exploration
-            else:
-                # Exploitation : Trouver l'action avec le max Q pour cet état
-                q_values = [self.get_q(state_idx, a) for a in range(len(options))]
-                if not q_values: # Sécurité si q_values est vide
-                    max_q = 0
-                else:
-                    max_q = max(q_values)
-                
-                # Astuce : Si plusieurs max égaux, on choisit au hasard parmi eux
-                best_actions = [i for i, q in enumerate(q_values) if q == max_q]
-                if not best_actions:
-                    action_idx = random.randint(0, len(options) - 1)
-                else:
-                    action_idx = random.choice(best_actions)
-            
-            chosen_config[param_name] = options[action_idx]
-            chosen_indices.append(action_idx)
-            
-        return chosen_config, chosen_indices
+        max_choices = max(len(opts) for opts in self.param_choices)
+        num_states = len(self.param_names) + 1 # +1 for the terminal state
+        self.q_table = np.zeros((num_states, max_choices))
 
-    def learn(self, action_indices, reward):
-        """Mise à jour de la Q-Table"""
-        for state_idx, action_idx in enumerate(action_indices):
-            old_q = self.get_q(state_idx, action_idx)
-            # Formule Q-Learning simplifiée (Bandit contextuel séquentiel)
-            new_q = old_q + self.lr * (reward - old_q)
-            self.q_table[(state_idx, action_idx)] = new_q
+    def choose_action(self, state_idx):
+        """Decide which option to pick for the current parameter."""
+        possible_actions = len(self.param_choices[state_idx])
+        
+        # Epsilon-Greedy Logic
+        if np.random.rand() < self.epsilon:
+            return np.random.randint(possible_actions)
+        else:
+            # Pick the action with the highest Q-value for this state
+            return np.argmax(self.q_table[state_idx, :possible_actions])
+
+    def train(self, episodes):
+        rewards_history = []
+        best_loss = float('inf')
+        best_config = None
+
+        for episode in range(episodes):
+            # Print progress every 5 episodes so I know it's working
+            if (episode+1) % 5 == 0:
+                print(f"--- Episode {episode+1}/{episodes} (Epsilon: {self.epsilon:.2f}) ---")
             
-        # Réduire l'exploration
-        self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
+            # Reset for the new episode
+            current_config = {}
+            trajectory = [] # Keep track of my choices: (state, action, next_state)
+            
+            # I iterate through my parameters one by one (Sequential Decision Process)
+            for state_idx in range(len(self.param_names)):
+                
+                # Make a choice
+                action_idx = self.choose_action(state_idx)
+                
+                # Decode the choice (index -> actual value) and store it
+                param_name = self.param_names[state_idx]
+                chosen_value = self.param_choices[state_idx][action_idx]
+                current_config[param_name] = chosen_value
+                
+                # Move to the next parameter
+                next_state_idx = state_idx + 1
+                
+                # Record this transition so I can learn from it later
+                trajectory.append((state_idx, action_idx, next_state_idx))
+
+            # Now that I have a full set of hyperparameters, I train the model to get the loss
+            loss = evaluate_config(current_config)
+            
+            # Convert Loss to Reward (Lower loss = Higher reward)
+            # Adding 1e-8 to avoid division by zero
+            final_reward = 10.0 / (loss + 1e-8)
+            
+            # Keep track of my personal best
+            if loss < best_loss:
+                best_loss = loss
+                best_config = current_config.copy()
+                print(f"   >>> NEW BEST FOUND! Loss: {best_loss:.4f}")
+
+            # I walk backward from the result to the first decision to update Q-values
+            for (s, a, s_next) in reversed(trajectory):
+                
+                # What is the potential of the NEXT state? (Max Q of next state)
+                if s_next < len(self.param_names):
+                    best_next_q = np.max(self.q_table[s_next, :len(self.param_choices[s_next])])
+                else:
+                    best_next_q = 0 # No future value after the last step
+                
+                # I only get the actual reward at the very end step
+                current_r = final_reward if s_next == len(self.param_names) else 0
+                
+                # Bellman Equation Update:
+                # New Q = Old Q + Alpha * (Reward + Gamma * Next_Best - Old Q)
+                self.q_table[s, a] += self.alpha * (current_r + self.gamma * best_next_q - self.q_table[s, a])
+
+            # Decay epsilon (reduce exploration over time)
+            self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
+            rewards_history.append(final_reward)
+
+        return best_config, best_loss, rewards_history
