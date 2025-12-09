@@ -12,9 +12,12 @@ class QLearningAgent:
         # SEARCH SPACE
         # I'm defining the hyperparameters and their possible values right here.
         # The order matters because I treat this as a sequence (State 0 -> State 1 -> etc.)
+        lr_options = np.geomspace(0.0001, 0.01, num=50).tolist()
+        dropout_options = np.linspace(0.0, 0.5, num=21).tolist()
+        
         self.param_specs = [
-            ('lr', [0.0001, 0.0005, 0.001, 0.005, 0.01]),
-            ('dropout', [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
+            ('lr', lr_options),
+            ('dropout', dropout_options),
             ('batch_size', [16, 32, 64, 128]),
             ('n_embd', [32, 64, 128]),
             ('n_layer', [2, 4, 6])
